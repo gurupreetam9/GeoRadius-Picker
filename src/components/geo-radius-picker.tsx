@@ -103,6 +103,7 @@ export function GeoRadiusPicker() {
   const centerMarkerRef = useRef<L.Marker | null>(null);
   const radiusMarkerRef = useRef<L.Marker | null>(null);
   const circleRef = useRef<L.Circle | null>(null);
+  const isDraggingRadiusRef = useRef(false);
 
   const { toast } = useToast();
   const debouncedRadius = useDebounce(radius, DEBOUNCE_DELAY);
@@ -124,12 +125,8 @@ export function GeoRadiusPicker() {
       }
     }
   }, []);
-
-  const radiusHandlePosition = useMemo(
-    () => getPointOnCircle(center, radius, 90),
-    [center, radius]
-  );
   
+  // Initialize map
   useEffect(() => {
     if (isMounted && mapContainerRef.current && !mapRef.current) {
       const map = L.map(mapContainerRef.current, {
@@ -145,18 +142,24 @@ export function GeoRadiusPicker() {
 
       mapRef.current = map;
       
-      // Map click event
       map.on('click', (e) => {
-        setCenter(e.latlng);
+        if (!isDraggingRadiusRef.current) {
+          setCenter(e.latlng);
+        }
       });
     }
   }, [isMounted]);
 
+  const radiusHandlePosition = useMemo(() => {
+    return getPointOnCircle(center, radius, 90);
+  }, [center, radius]);
+
+  // Update markers and circle
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-
-    // Center marker
+  
+    // Center Marker
     if (!centerMarkerRef.current) {
       centerMarkerRef.current = L.marker(center, { draggable: true, icon: markerIcon }).addTo(map);
       centerMarkerRef.current.on('dragend', () => {
@@ -167,34 +170,51 @@ export function GeoRadiusPicker() {
     } else {
       centerMarkerRef.current.setLatLng(center);
     }
-    
-    // Radius handle marker
+  
+    // Radius Circle
+    if (!circleRef.current) {
+      circleRef.current = L.circle(center, {
+        radius: debouncedRadius,
+        color: 'hsl(var(--primary))',
+        fillColor: 'hsl(var(--primary))',
+        fillOpacity: 0.2,
+        weight: 2
+      }).addTo(map);
+    } else {
+      circleRef.current.setLatLng(center);
+      circleRef.current.setRadius(debouncedRadius);
+    }
+  
+    // Radius Handle Marker
     if (!radiusMarkerRef.current) {
-      radiusMarkerRef.current = L.marker(radiusHandlePosition, { draggable: true, icon: radiusHandleIcon }).addTo(map);
-      const handleRadiusDrag = () => {
-        if (radiusMarkerRef.current) {
-          const newRadius = center.distanceTo(radiusMarkerRef.current.getLatLng());
+      const handlePosition = getPointOnCircle(center, radius, 90);
+      radiusMarkerRef.current = L.marker(handlePosition, { draggable: true, icon: radiusHandleIcon }).addTo(map);
+      
+      radiusMarkerRef.current.on('dragstart', () => {
+        isDraggingRadiusRef.current = true;
+      });
+      
+      radiusMarkerRef.current.on('drag', () => {
+        if (radiusMarkerRef.current && centerMarkerRef.current) {
+          const centerPoint = centerMarkerRef.current.getLatLng();
+          const handlePoint = radiusMarkerRef.current.getLatLng();
+          const newRadius = centerPoint.distanceTo(handlePoint);
           setRadius(newRadius);
         }
-      };
-      radiusMarkerRef.current.on('drag', handleRadiusDrag);
-      radiusMarkerRef.current.on('dragend', handleRadiusDrag);
+      });
+
+      radiusMarkerRef.current.on('dragend', () => {
+        isDraggingRadiusRef.current = false;
+      });
 
     } else {
-        radiusMarkerRef.current.setLatLng(radiusHandlePosition);
+       if (!isDraggingRadiusRef.current) {
+         const handlePosition = getPointOnCircle(center, radius, 90);
+         radiusMarkerRef.current.setLatLng(handlePosition);
+       }
     }
-
-    // Radius circle
-    if (!circleRef.current) {
-        circleRef.current = L.circle(center, {
-            radius: debouncedRadius,
-            pathOptions: { color: 'hsl(var(--primary))', fillColor: 'hsl(var(--primary))', fillOpacity: 0.2, weight: 2, opacity: 0.8 },
-        }).addTo(map);
-    } else {
-        circleRef.current.setLatLng(center);
-        circleRef.current.setRadius(debouncedRadius);
-    }
-  }, [center, radius, debouncedRadius, isMounted, radiusHandlePosition]);
+  
+  }, [center, radius, debouncedRadius, isMounted]);
 
 
   const handleConfirm = () => {
