@@ -127,7 +127,7 @@ export function GeoRadiusPicker() {
   useEffect(() => {
     if (isMounted && mapContainerRef.current && !mapRef.current) {
       const map = L.map(mapContainerRef.current, {
-        center: INITIAL_CENTER,
+        center: center,
         zoom: INITIAL_ZOOM,
         scrollWheelZoom: true,
         zoomControl: false,
@@ -138,6 +138,24 @@ export function GeoRadiusPicker() {
       }).addTo(map);
 
       mapRef.current = map;
+
+      // Get user's location
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const userLatLng = L.latLng(position.coords.latitude, position.coords.longitude);
+            setCenter(userLatLng);
+            map.setView(userLatLng, 13);
+          },
+          () => {
+            // User denied permission or error occurred
+            map.setView(INITIAL_CENTER, INITIAL_ZOOM);
+          }
+        );
+      } else {
+        // Geolocation not supported
+        map.setView(INITIAL_CENTER, INITIAL_ZOOM);
+      }
       
       map.on('click', (e) => {
         if (!isDraggingRadiusRef.current) {
@@ -145,7 +163,7 @@ export function GeoRadiusPicker() {
         }
       });
     }
-  }, [isMounted]);
+  }, [isMounted, center]);
 
   // Update markers and circle
   useEffect(() => {
