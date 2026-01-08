@@ -1,13 +1,7 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
-import {
-  APIProvider,
-  Map,
-  AdvancedMarker,
-  useMap,
-  useAdvancedMarkerRef,
-} from "@vis.gl/react-google-maps";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import L from "leaflet";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -16,13 +10,10 @@ import { MapPin, Search, Copy, CheckCircle, Loader2 } from "lucide-react";
 import { geocodeAddress } from "@/ai/flows/geocode-address-to-coordinates";
 import { useToast } from "@/hooks/use-toast";
 import { useDebounce } from "@/hooks/use-debounce";
-import { haversineDistance, getPointOnCircle } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
@@ -46,7 +37,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "./ui/label";
 
 const DEBOUNCE_DELAY = 500;
-const INITIAL_CENTER = { lat: 51.5072, lng: -0.1276 }; // London
+const INITIAL_CENTER: L.LatLngExpression = [51.5072, -0.1276]; // London
 const INITIAL_RADIUS = 5000; // 5km in meters
 const INITIAL_ZOOM = 10;
 const DEEP_LINK_BASE = "myapp://location-picker";
@@ -62,49 +53,57 @@ type FallbackInfo = {
   url: string;
 };
 
-// Re-implement Circle component since it was removed from the library
-const Circle = (props: google.maps.CircleOptions) => {
-  const map = useMap();
-  const [circle, setCircle] = useState<google.maps.Circle | null>(null);
+// Custom icon for the markers
+const markerIcon = new L.Icon({
+    iconUrl: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" fill="%237B2CBF" stroke="white" stroke-width="1.5"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/><circle cx="12" cy="9.5" r="2.5" fill="white" /></svg>`,
+    iconSize: [32, 32],
+    iconAnchor: [16, 32],
+    popupAnchor: [0, -32],
+});
 
-  useEffect(() => {
-    if (!map) return;
-    if (!circle) {
-      setCircle(new google.maps.Circle(props));
-    } else {
-      circle.setOptions(props);
-    }
-  }, [map, circle, props]);
+const radiusHandleIcon = new L.Icon({
+    iconUrl: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="white" stroke="%237B2CBF" stroke-width="2"/></svg>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+});
 
-  useEffect(() => {
-    if (circle) {
-      circle.setMap(map);
-    }
-    return () => {
-      if (circle) {
-        circle.setMap(null);
-      }
-    };
-  }, [map, circle]);
+function getPointOnCircle(center: L.LatLng, radius: number, bearing: number): L.LatLng {
+    const R = 6371e3; // Earth's radius in meters
+    const toRad = (deg: number) => deg * (Math.PI / 180);
+    const toDeg = (rad: number) => rad * (180 / Math.PI);
 
-  return null;
-};
+    const lat1 = toRad(center.lat);
+    const lon1 = toRad(center.lng);
+    const brng = toRad(bearing);
 
-export function GeoRadiusPicker({ apiKey }: { apiKey: string }) {
-  return (
-    <APIProvider apiKey={apiKey} libraries={["marker", "geometry"]}>
-      <MapContainer />
-    </APIProvider>
-  );
+    const lat2 = Math.asin(
+        Math.sin(lat1) * Math.cos(radius / R) +
+        Math.cos(lat1) * Math.sin(radius / R) * Math.cos(brng)
+    );
+
+    const lon2 =
+        lon1 +
+        Math.atan2(
+            Math.sin(brng) * Math.sin(radius / R) * Math.cos(lat1),
+            Math.cos(radius / R) - Math.sin(lat1) * Math.sin(lat2)
+        );
+
+    return L.latLng(toDeg(lat2), toDeg(lon2));
 }
 
-function MapContainer() {
-  const [center, setCenter] = useState(INITIAL_CENTER);
+export function GeoRadiusPicker() {
+  const [center, setCenter] = useState(L.latLng(INITIAL_CENTER[0], INITIAL_CENTER[1]));
   const [radius, setRadius] = useState(INITIAL_RADIUS);
   const [fallbackInfo, setFallbackInfo] = useState<FallbackInfo | null>(null);
   const [copied, setCopied] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
 
-  const map = useMap();
+  const mapRef = useRef<L.Map | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const centerMarkerRef = useRef<L.Marker | null>(null);
+  const radiusMarkerRef = useRef<L.Marker | null>(null);
+  const circleRef = useRef<L.Circle | null>(null);
+
   const { toast } = useToast();
   const debouncedRadius = useDebounce(radius, DEBOUNCE_DELAY);
 
@@ -116,35 +115,87 @@ function MapContainer() {
     formState: { isSubmitting },
   } = form;
 
-  const handleMapClick = useCallback((e: google.maps.MapMouseEvent) => {
-    if (e.latLng) {
-      setCenter({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+  useEffect(() => {
+    setIsMounted(true);
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
     }
   }, []);
-
-  const handleCenterDragEnd = useCallback(
-    (e: google.maps.MapMouseEvent) => {
-      if (e.latLng) {
-        setCenter({ lat: e.latLng.lat(), lng: e.latLng.lng() });
-      }
-    },
-    []
-  );
 
   const radiusHandlePosition = useMemo(
     () => getPointOnCircle(center, radius, 90),
     [center, radius]
   );
-
-  const handleRadiusDrag = useCallback((e: google.maps.MapMouseEvent) => {
-    if (e.latLng) {
-      const newRadius = haversineDistance(center, {
-        lat: e.latLng.lat(),
-        lng: e.latLng.lng(),
+  
+  useEffect(() => {
+    if (isMounted && mapContainerRef.current && !mapRef.current) {
+      const map = L.map(mapContainerRef.current, {
+        center: INITIAL_CENTER,
+        zoom: INITIAL_ZOOM,
+        scrollWheelZoom: true,
+        zoomControl: false,
       });
-      setRadius(newRadius);
+
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      }).addTo(map);
+
+      mapRef.current = map;
+      
+      // Map click event
+      map.on('click', (e) => {
+        setCenter(e.latlng);
+      });
     }
-  }, [center]);
+  }, [isMounted]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    // Center marker
+    if (!centerMarkerRef.current) {
+      centerMarkerRef.current = L.marker(center, { draggable: true, icon: markerIcon }).addTo(map);
+      centerMarkerRef.current.on('dragend', () => {
+        if (centerMarkerRef.current) {
+          setCenter(centerMarkerRef.current.getLatLng());
+        }
+      });
+    } else {
+      centerMarkerRef.current.setLatLng(center);
+    }
+    
+    // Radius handle marker
+    if (!radiusMarkerRef.current) {
+      radiusMarkerRef.current = L.marker(radiusHandlePosition, { draggable: true, icon: radiusHandleIcon }).addTo(map);
+      const handleRadiusDrag = () => {
+        if (radiusMarkerRef.current) {
+          const newRadius = center.distanceTo(radiusMarkerRef.current.getLatLng());
+          setRadius(newRadius);
+        }
+      };
+      radiusMarkerRef.current.on('drag', handleRadiusDrag);
+      radiusMarkerRef.current.on('dragend', handleRadiusDrag);
+
+    } else {
+        radiusMarkerRef.current.setLatLng(radiusHandlePosition);
+    }
+
+    // Radius circle
+    if (!circleRef.current) {
+        circleRef.current = L.circle(center, {
+            radius: debouncedRadius,
+            pathOptions: { color: 'hsl(var(--primary))', fillColor: 'hsl(var(--primary))', fillOpacity: 0.2, weight: 2, opacity: 0.8 },
+        }).addTo(map);
+    } else {
+        circleRef.current.setLatLng(center);
+        circleRef.current.setRadius(debouncedRadius);
+    }
+  }, [center, radius, debouncedRadius, isMounted, radiusHandlePosition]);
+
 
   const handleConfirm = () => {
     const lat = parseFloat(center.lat.toFixed(6));
@@ -175,10 +226,9 @@ function MapContainer() {
     try {
       const result = await geocodeAddress({ address: data.address });
       if (result?.latitude && result?.longitude) {
-        const newCenter = { lat: result.latitude, lng: result.longitude };
+        const newCenter = L.latLng(result.latitude, result.longitude);
         setCenter(newCenter);
-        map?.panTo(newCenter);
-        map?.setZoom(14);
+        mapRef.current?.setView(newCenter, 14);
         toast({
           title: "Location Found",
           description: `Map centered on ${data.address}.`,
@@ -196,51 +246,20 @@ function MapContainer() {
   }
 
   useEffect(() => {
-    if (map) {
-        map.panTo(center);
+    if (mapRef.current) {
+        mapRef.current.panTo(center);
     }
-  }, [center, map]);
+  }, [center]);
+
+  if (!isMounted) {
+     return <div className="h-full w-full flex items-center justify-center"><p>Loading Map...</p></div>;
+  }
 
   return (
     <>
-      <Map
-        defaultCenter={INITIAL_CENTER}
-        defaultZoom={INITIAL_ZOOM}
-        mapId="a3a71f43477c7c8c"
-        onClick={handleMapClick}
-        gestureHandling="greedy"
-        disableDefaultUI
-        className="h-full w-full"
-      >
-        <AdvancedMarker
-          position={center}
-          gmpDraggable
-          onDragEnd={handleCenterDragEnd}
-        >
-          <MapPin className="h-8 w-8 text-primary-foreground fill-primary" />
-        </AdvancedMarker>
-
-        <AdvancedMarker
-            position={radiusHandlePosition}
-            gmpDraggable
-            onDrag={handleRadiusDrag}
-            onDragEnd={handleRadiusDrag}
-        >
-            <div className="h-4 w-4 rounded-full bg-primary-foreground border-2 border-primary shadow-lg cursor-grab active:cursor-grabbing"></div>
-        </AdvancedMarker>
-
-        <Circle
-          center={center}
-          radius={debouncedRadius}
-          strokeColor="hsl(var(--primary))"
-          strokeOpacity={0.8}
-          strokeWeight={2}
-          fillColor="hsl(var(--primary))"
-          fillOpacity={0.2}
-        />
-      </Map>
-
-      <Card className="absolute bottom-4 left-4 right-4 z-10 w-auto max-w-lg mx-auto shadow-2xl">
+      <div ref={mapContainerRef} className="h-full w-full" />
+      
+      <Card className="absolute bottom-4 left-4 right-4 z-[1000] w-auto max-w-lg mx-auto shadow-2xl">
         <Tabs defaultValue="location">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="location">Location & Radius</TabsTrigger>
