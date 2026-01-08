@@ -9,7 +9,6 @@ import { MapPin, Search, Copy, CheckCircle, Loader2 } from "lucide-react";
 
 import { geocodeAddress } from "@/ai/flows/geocode-address-to-coordinates";
 import { useToast } from "@/hooks/use-toast";
-import { useDebounce } from "@/hooks/use-debounce";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -36,7 +35,6 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "./ui/label";
 
-const DEBOUNCE_DELAY = 500;
 const INITIAL_CENTER: L.LatLngExpression = [51.5072, -0.1276]; // London
 const INITIAL_RADIUS = 5000; // 5km in meters
 const INITIAL_ZOOM = 10;
@@ -106,7 +104,6 @@ export function GeoRadiusPicker() {
   const isDraggingRadiusRef = useRef(false);
 
   const { toast } = useToast();
-  const debouncedRadius = useDebounce(radius, DEBOUNCE_DELAY);
 
   const form = useForm<z.infer<typeof AddressFormSchema>>({
     resolver: zodResolver(AddressFormSchema),
@@ -150,14 +147,10 @@ export function GeoRadiusPicker() {
     }
   }, [isMounted]);
 
-  const radiusHandlePosition = useMemo(() => {
-    return getPointOnCircle(center, radius, 90);
-  }, [center, radius]);
-
   // Update markers and circle
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map || !isMounted) return;
   
     // Center Marker
     if (!centerMarkerRef.current) {
@@ -174,7 +167,7 @@ export function GeoRadiusPicker() {
     // Radius Circle
     if (!circleRef.current) {
       circleRef.current = L.circle(center, {
-        radius: debouncedRadius,
+        radius: radius,
         color: 'hsl(var(--primary))',
         fillColor: 'hsl(var(--primary))',
         fillOpacity: 0.2,
@@ -182,7 +175,7 @@ export function GeoRadiusPicker() {
       }).addTo(map);
     } else {
       circleRef.current.setLatLng(center);
-      circleRef.current.setRadius(debouncedRadius);
+      circleRef.current.setRadius(radius);
     }
   
     // Radius Handle Marker
@@ -195,11 +188,12 @@ export function GeoRadiusPicker() {
       });
       
       radiusMarkerRef.current.on('drag', () => {
-        if (radiusMarkerRef.current && centerMarkerRef.current) {
+        if (radiusMarkerRef.current && centerMarkerRef.current && circleRef.current) {
           const centerPoint = centerMarkerRef.current.getLatLng();
           const handlePoint = radiusMarkerRef.current.getLatLng();
           const newRadius = centerPoint.distanceTo(handlePoint);
           setRadius(newRadius);
+          circleRef.current.setRadius(newRadius); // Update circle radius in real-time
         }
       });
 
@@ -214,7 +208,7 @@ export function GeoRadiusPicker() {
        }
     }
   
-  }, [center, radius, debouncedRadius, isMounted]);
+  }, [center, radius, isMounted]);
 
 
   const handleConfirm = () => {
