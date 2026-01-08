@@ -5,7 +5,6 @@ import {
   APIProvider,
   Map,
   AdvancedMarker,
-  Circle,
   useMap,
   useAdvancedMarkerRef,
 } from "@vis.gl/react-google-maps";
@@ -63,9 +62,37 @@ type FallbackInfo = {
   url: string;
 };
 
+// Re-implement Circle component since it was removed from the library
+const Circle = (props: google.maps.CircleOptions) => {
+  const map = useMap();
+  const [circle, setCircle] = useState<google.maps.Circle | null>(null);
+
+  useEffect(() => {
+    if (!map) return;
+    if (!circle) {
+      setCircle(new google.maps.Circle(props));
+    } else {
+      circle.setOptions(props);
+    }
+  }, [map, circle, props]);
+
+  useEffect(() => {
+    if (circle) {
+      circle.setMap(map);
+    }
+    return () => {
+      if (circle) {
+        circle.setMap(null);
+      }
+    };
+  }, [map, circle]);
+
+  return null;
+};
+
 export function GeoRadiusPicker({ apiKey }: { apiKey: string }) {
   return (
-    <APIProvider apiKey={apiKey} libraries={["marker"]}>
+    <APIProvider apiKey={apiKey} libraries={["marker", "geometry"]}>
       <MapContainer />
     </APIProvider>
   );
