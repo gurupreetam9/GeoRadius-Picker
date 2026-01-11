@@ -58,11 +58,11 @@ function createGeoJSONCircle(center: [number, number], radius: number, points = 
 const INITIAL_VIEW_STATE = {
   longitude: -0.1276,
   latitude: 51.5072,
-  zoom: 10,
+  zoom: 14,
   pitch: 0,
   bearing: 0,
 };
-const INITIAL_RADIUS = 5000; // 5km in meters
+const INITIAL_RADIUS = 200; // 200m in meters
 const DEEP_LINK_BASE = "myapp://location-picker";
 
 const AddressFormSchema = z.object({
@@ -107,6 +107,7 @@ export function GeoRadiusPicker() {
   }, []);
 
   useEffect(() => {
+      // Only update handle if not dragging
       if (!isRadiusDragging) {
         const bearing = 90; // East
         const R = 6371e3; // Earth's radius in meters
@@ -153,7 +154,7 @@ export function GeoRadiusPicker() {
           const userLngLat: [number, number] = [position.coords.longitude, position.coords.latitude];
           setUserLocation(userLngLat);
           setCenter(userLngLat);
-          mapRef.current?.flyTo({ center: userLngLat, zoom: 13 });
+          mapRef.current?.flyTo({ center: userLngLat, zoom: 14 });
         },
         () => {
           toast({
@@ -182,16 +183,29 @@ export function GeoRadiusPicker() {
     const from = center;
     const to: [number, number] = [e.lngLat.lng, e.lngLat.lat];
     
-    if (mapRef.current) {
-      const dist = mapRef.current.getMap().project(from).dist(mapRef.current.getMap().project(to));
-      setRadius(dist);
-    }
+    // Using cheap distance formula for real-time feedback
+    const R = 6371e3; // metres
+    const toRad = (deg: number) => deg * Math.PI/180;
+    const φ1 = toRad(from[1]);
+    const φ2 = toRad(to[1]);
+    const Δφ = toRad(to[1]-from[1]);
+    const Δλ = toRad(to[0]-from[0]);
+
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+    const dist = R * c; // in metres
+    
+    setRadius(dist);
+    // Let the marker component handle its own position during drag
   }, [center]);
 
   const onRadiusDragEnd = (e: { lngLat: { lng: number, lat: number }}) => {
     setIsRadiusDragging(false);
-    const to: [number, number] = [e.lngLat.lng, e.lngLat.lat];
-    setHandlePosition(to);
+    // Final sync of the handle position
+    setHandlePosition([e.lngLat.lng, e.lngLat.lat]);
   }
 
   const handleConfirm = () => {
@@ -245,7 +259,7 @@ export function GeoRadiusPicker() {
   const handleRecenter = () => {
     if (userLocation) {
         setCenter(userLocation);
-        mapRef.current?.flyTo({ center: userLocation, zoom: 13 });
+        mapRef.current?.flyTo({ center: userLocation, zoom: 14 });
         toast({
             title: "Re-centered",
             description: "Map centered on your current location.",
@@ -361,7 +375,7 @@ export function GeoRadiusPicker() {
                 <div className="flex justify-between items-baseline">
                   <Label htmlFor="radius-slider" className="text-xs text-muted-foreground">Radius</Label>
                   <p className="font-mono text-sm">
-                    {(radius / 1000).toFixed(2)} km
+                    {Math.round(radius)} m
                   </p>
                 </div>
                 <Slider
