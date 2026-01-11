@@ -41,17 +41,15 @@ function createGeoJSONCircle(center: [number, number], radius: number, points = 
     ret.push(ret[0]);
 
     return {
-        type: "geojson",
-        data: {
-            type: "FeatureCollection",
-            features: [{
-                type: "Feature",
-                geometry: {
-                    type: "Polygon",
-                    coordinates: [ret]
-                }
-            }]
-        }
+        type: "FeatureCollection" as const,
+        features: [{
+            type: "Feature" as const,
+            geometry: {
+                type: "Polygon" as const,
+                coordinates: [ret]
+            },
+            properties: {}
+        }]
     };
 }
 
@@ -174,7 +172,7 @@ export function GeoRadiusPicker() {
     }
   }, [locateUser]);
 
-  const circleSource = useMemo(() => createGeoJSONCircle(center as [number, number], radius), [center, radius]);
+  const circleGeoJSON = useMemo(() => createGeoJSONCircle(center as [number, number], radius), [center, radius]);
 
   const onCenterDrag = (e: { lngLat: { lng: number; lat: number; }}) => {
     setCenter([e.lngLat.lng, e.lngLat.lat]);
@@ -310,7 +308,7 @@ export function GeoRadiusPicker() {
             ]
         }}
       >
-        <Source id="radius-circle" {...circleSource}>
+        <Source id="radius-circle" type="geojson" data={circleGeoJSON}>
             <Layer {...circleLayer} />
             <Layer {...circleOutlineLayer} />
         </Source>
