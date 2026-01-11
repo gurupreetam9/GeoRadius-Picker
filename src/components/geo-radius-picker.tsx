@@ -163,7 +163,7 @@ export function GeoRadiusPicker() {
         }
       });
     }
-  }, [isMounted, center]);
+  }, [isMounted]);
 
   // Update markers and circle
   useEffect(() => {
