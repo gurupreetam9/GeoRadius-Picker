@@ -99,6 +99,7 @@ export function GeoRadiusPicker() {
   const [viewState, setViewState] = useState<Partial<ViewState>>(INITIAL_VIEW_STATE);
   const [center, setCenter] = useState([INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude]);
   const [radius, setRadius] = useState(INITIAL_RADIUS);
+  const [handlePosition, setHandlePosition] = useState<[number, number]>([0,0]);
   const [fallbackInfo, setFallbackInfo] = useState<FallbackInfo | null>(null);
   const [copied, setCopied] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
@@ -124,6 +125,11 @@ export function GeoRadiusPicker() {
       setPrimaryColor(`hsl(${color.trim()})`);
     }
   }, []);
+
+  useEffect(() => {
+      const newHandlePosition = destination(center as [number, number], radius, 90);
+      setHandlePosition(newHandlePosition);
+  }, [center, radius]);
 
   const circleLayer: Layer = useMemo(() => ({
     id: 'radius-circle',
@@ -175,7 +181,6 @@ export function GeoRadiusPicker() {
   }, [locateUser, mapRef.current]);
 
   const circleSource = useMemo(() => createGeoJSONCircle(center as [number, number], radius), [center, radius]);
-  const handlePosition = useMemo(() => destination(center as [number, number], radius, 90), [center, radius]);
 
   const onCenterDrag = (e: { lngLat: { lng: number; lat: number; }}) => {
     setCenter([e.lngLat.lng, e.lngLat.lat]);
@@ -187,6 +192,7 @@ export function GeoRadiusPicker() {
     const newRadius = mapRef.current?.getMap().project(from).dist(mapRef.current?.getMap().project(to));
     if(newRadius) {
        setRadius(newRadius);
+       setHandlePosition(to);
     }
   };
 
