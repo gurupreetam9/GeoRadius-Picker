@@ -178,7 +178,7 @@ export function GeoRadiusPicker() {
     setCenter([e.lngLat.lng, e.lngLat.lat]);
   };
 
-  const onRadiusDrag = (e: { lngLat: { lng: number, lat: number }}) => {
+  const onRadiusDrag = useCallback((e: { lngLat: { lng: number, lat: number }}) => {
     const from = center;
     const to: [number, number] = [e.lngLat.lng, e.lngLat.lat];
     
@@ -186,8 +186,13 @@ export function GeoRadiusPicker() {
       const dist = mapRef.current.getMap().project(from).dist(mapRef.current.getMap().project(to));
       setRadius(dist);
     }
+  }, [center]);
+
+  const onRadiusDragEnd = (e: { lngLat: { lng: number, lat: number }}) => {
+    setIsRadiusDragging(false);
+    const to: [number, number] = [e.lngLat.lng, e.lngLat.lat];
     setHandlePosition(to);
-  };
+  }
 
   const handleConfirm = () => {
     const lng = parseFloat(center[0].toFixed(6));
@@ -315,10 +320,7 @@ export function GeoRadiusPicker() {
             draggable
             onDragStart={() => setIsRadiusDragging(true)}
             onDrag={onRadiusDrag}
-            onDragEnd={(e) => {
-              onRadiusDrag(e);
-              setIsRadiusDragging(false);
-            }}
+            onDragEnd={onRadiusDragEnd}
         >
             <div className="cursor-grab active:cursor-grabbing">
                 <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="white" stroke={primaryColor} strokeWidth="2"/></svg>
