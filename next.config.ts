@@ -30,17 +30,7 @@ const nextConfig: NextConfig = {
       },
       {
         protocol: 'https',
-        hostname: 'a.tile.openstreetmap.org',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'b.tile.openstreetmap.org',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'c.tile.openstreetmap.org',
+        hostname: 'api.maptiler.com',
         pathname: '/**',
       },
     ],

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import Map, { Marker, Source, Layer, MapRef, ViewState, Point } from "react-map-gl";
+import Map, { Marker, Source, Layer, MapRef, ViewState } from "react-map-gl/maplibre";
 import maplibregl from "maplibre-gl";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
