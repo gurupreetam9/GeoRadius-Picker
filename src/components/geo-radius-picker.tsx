@@ -5,7 +5,7 @@ import L from "leaflet";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { MapPin, Search, Copy, CheckCircle, Loader2 } from "lucide-react";
+import { MapPin, Search, Copy, CheckCircle, Loader2, Locate } from "lucide-react";
 
 import { geocodeAddress } from "@/ai/flows/geocode-address-to-coordinates";
 import { useToast } from "@/hooks/use-toast";
@@ -95,6 +95,7 @@ export function GeoRadiusPicker() {
   const [fallbackInfo, setFallbackInfo] = useState<FallbackInfo | null>(null);
   const [copied, setCopied] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [userLocation, setUserLocation] = useState<L.LatLng | null>(null);
 
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -122,6 +123,30 @@ export function GeoRadiusPicker() {
       }
     }
   }, []);
+
+  const locateUser = useCallback(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const userLatLng = L.latLng(position.coords.latitude, position.coords.longitude);
+          setUserLocation(userLatLng);
+          setCenter(userLatLng);
+          mapRef.current?.setView(userLatLng, 13);
+        },
+        () => {
+          toast({
+            variant: "destructive",
+            title: "Location Error",
+            description: "Could not access your location. Please enable location services.",
+          });
+          mapRef.current?.setView(INITIAL_CENTER, INITIAL_ZOOM);
+        }
+      );
+    } else {
+      // Geolocation not supported
+      mapRef.current?.setView(INITIAL_CENTER, INITIAL_ZOOM);
+    }
+  }, [toast]);
   
   // Initialize map
   useEffect(() => {
@@ -131,6 +156,8 @@ export function GeoRadiusPicker() {
         zoom: INITIAL_ZOOM,
         scrollWheelZoom: true,
         zoomControl: false,
+        touchZoom: true,
+        dragging: true,
       });
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -140,22 +167,7 @@ export function GeoRadiusPicker() {
       mapRef.current = map;
 
       // Get user's location
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            const userLatLng = L.latLng(position.coords.latitude, position.coords.longitude);
-            setCenter(userLatLng);
-            map.setView(userLatLng, 13);
-          },
-          () => {
-            // User denied permission or error occurred
-            map.setView(INITIAL_CENTER, INITIAL_ZOOM);
-          }
-        );
-      } else {
-        // Geolocation not supported
-        map.setView(INITIAL_CENTER, INITIAL_ZOOM);
-      }
+      locateUser();
       
       map.on('click', (e) => {
         if (!isDraggingRadiusRef.current) {
@@ -163,7 +175,7 @@ export function GeoRadiusPicker() {
         }
       });
     }
-  }, [isMounted]);
+  }, [isMounted, locateUser, center]);
 
   // Update markers and circle
   useEffect(() => {
@@ -277,6 +289,19 @@ export function GeoRadiusPicker() {
     }
   }
 
+  const handleRecenter = () => {
+    if (userLocation) {
+        setCenter(userLocation);
+        mapRef.current?.setView(userLocation, 13);
+        toast({
+            title: "Re-centered",
+            description: "Map centered on your current location.",
+        });
+    } else {
+        locateUser(); // If user location is not available, try to get it again.
+    }
+  };
+
   useEffect(() => {
     if (mapRef.current) {
         mapRef.current.panTo(center);
@@ -291,6 +316,16 @@ export function GeoRadiusPicker() {
     <>
       <div ref={mapContainerRef} className="h-full w-full" />
       
+      <Button
+        variant="outline"
+        size="icon"
+        onClick={handleRecenter}
+        className="absolute top-4 right-4 z-[1000] bg-background/80 backdrop-blur-sm"
+        aria-label="Recenter map to your location"
+      >
+        <Locate />
+      </Button>
+
       <Card className="absolute bottom-4 left-4 right-4 z-[1000] w-auto max-w-lg mx-auto shadow-2xl">
         <Tabs defaultValue="location">
           <TabsList className="grid w-full grid-cols-2">
