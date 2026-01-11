@@ -129,7 +129,6 @@ export function GeoRadiusPicker() {
   const circleLayer: Layer = useMemo(() => ({
     id: 'radius-circle',
     type: 'fill',
-    source: 'radius-circle',
     paint: {
         'fill-color': primaryColor,
         'fill-opacity': 0.2
@@ -139,7 +138,6 @@ export function GeoRadiusPicker() {
   const circleOutlineLayer: Layer = useMemo(() => ({
       id: 'radius-circle-outline',
       type: 'line',
-      source: 'radius-circle',
       paint: {
           'line-color': primaryColor,
           'line-width': 2
@@ -165,14 +163,14 @@ export function GeoRadiusPicker() {
       );
     }
   }, [toast]);
-  
-  useEffect(() => {
-    if(mapRef.current) {
-        locateUser();
-    }
-  }, [locateUser]);
 
   const circleGeoJSON = useMemo(() => createGeoJSONCircle(center as [number, number], radius), [center, radius]);
+
+  const circleSource = useMemo(() => ({
+    id: 'radius-circle',
+    type: 'geojson' as const,
+    data: circleGeoJSON,
+  }), [circleGeoJSON]);
 
   const onCenterDrag = (e: { lngLat: { lng: number; lat: number; }}) => {
     setCenter([e.lngLat.lng, e.lngLat.lat]);
@@ -279,6 +277,7 @@ export function GeoRadiusPicker() {
         initialViewState={INITIAL_VIEW_STATE}
         {...viewState}
         onMove={evt => setViewState(evt.viewState)}
+        onLoad={locateUser}
         onClick={(e) => {
           if (!isRadiusDragging) {
              setCenter([e.lngLat.lng, e.lngLat.lat]);
@@ -308,7 +307,7 @@ export function GeoRadiusPicker() {
             ]
         }}
       >
-        <Source id="radius-circle" type="geojson" data={circleGeoJSON}>
+        <Source {...circleSource}>
             <Layer {...circleLayer} />
             <Layer {...circleOutlineLayer} />
         </Source>
