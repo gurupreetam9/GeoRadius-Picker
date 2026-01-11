@@ -19,24 +19,6 @@ import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescript
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "./ui/label";
 
-// Turf.js helpers for geo calculations
-function destination(center: [number, number], radius: number, bearing: number): [number, number] {
-  const R = 6371e3; // Earth's radius in meters
-  const toRad = (deg: number) => deg * (Math.PI / 180);
-  const toDeg = (rad: number) => rad * (180 / Math.PI);
-
-  const [lon1, lat1] = center;
-  const lat1Rad = toRad(lat1);
-  const lon1Rad = toRad(lon1);
-  const brng = toRad(bearing);
-  const ad = radius / R;
-
-  const lat2Rad = Math.asin(Math.sin(lat1Rad) * Math.cos(ad) + Math.cos(lat1Rad) * Math.sin(ad) * Math.cos(brng));
-  const lon2Rad = lon1Rad + Math.atan2(Math.sin(brng) * Math.sin(ad) * Math.cos(lat1Rad), Math.cos(ad) - Math.sin(lat1Rad) * Math.sin(lat2Rad));
-  
-  return [toDeg(lon2Rad), toDeg(lat2Rad)];
-}
-
 function createGeoJSONCircle(center: [number, number], radius: number, points = 64) {
     const coords = {
         latitude: center[1],
@@ -72,7 +54,6 @@ function createGeoJSONCircle(center: [number, number], radius: number, points = 
         }
     };
 }
-
 
 const INITIAL_VIEW_STATE = {
   longitude: -0.1276,
@@ -121,16 +102,27 @@ export function GeoRadiusPicker() {
     setIsMounted(true);
     const color = getComputedStyle(document.documentElement).getPropertyValue('--primary');
     if (color) {
-      // The color is in HSL format like "263 62% 45%", convert to "hsl(263, 62%, 45%)"
       setPrimaryColor(`hsl(${color.trim()})`);
     }
   }, []);
 
   useEffect(() => {
-      // Only update handle position from radius if not dragging
       if (!isRadiusDragging) {
-        const newHandlePosition = destination(center as [number, number], radius, 90);
-        setHandlePosition(newHandlePosition);
+        const bearing = 90; // East
+        const R = 6371e3; // Earth's radius in meters
+        const toRad = (deg: number) => deg * (Math.PI / 180);
+        const toDeg = (rad: number) => rad * (180 / Math.PI);
+      
+        const [lon1, lat1] = center;
+        const lat1Rad = toRad(lat1);
+        const lon1Rad = toRad(lon1);
+        const brng = toRad(bearing);
+        const ad = radius / R;
+      
+        const lat2Rad = Math.asin(Math.sin(lat1Rad) * Math.cos(ad) + Math.cos(lat1Rad) * Math.sin(ad) * Math.cos(brng));
+        const lon2Rad = lon1Rad + Math.atan2(Math.sin(brng) * Math.sin(ad) * Math.cos(lat1Rad), Math.cos(ad) - Math.sin(lat1Rad) * Math.sin(lat2Rad));
+        
+        setHandlePosition([toDeg(lon2Rad), toDeg(lat2Rad)]);
       }
   }, [center, radius, isRadiusDragging]);
 
@@ -169,11 +161,8 @@ export function GeoRadiusPicker() {
             title: "Location Error",
             description: "Could not access your location. Please enable location services.",
           });
-          mapRef.current?.flyTo({ center: [INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude], zoom: INITIAL_VIEW_STATE.zoom });
         }
       );
-    } else {
-      mapRef.current?.flyTo({ center: [INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude], zoom: INITIAL_VIEW_STATE.zoom });
     }
   }, [toast]);
   
@@ -181,7 +170,7 @@ export function GeoRadiusPicker() {
     if(mapRef.current) {
         locateUser();
     }
-  }, [locateUser, mapRef.current]);
+  }, [locateUser]);
 
   const circleSource = useMemo(() => createGeoJSONCircle(center as [number, number], radius), [center, radius]);
 
@@ -192,11 +181,12 @@ export function GeoRadiusPicker() {
   const onRadiusDrag = (e: { lngLat: { lng: number, lat: number }}) => {
     const from = center;
     const to: [number, number] = [e.lngLat.lng, e.lngLat.lat];
-    const newRadius = mapRef.current?.getMap().project(from).dist(mapRef.current?.getMap().project(to));
-    if(newRadius) {
-       setRadius(newRadius);
-       setHandlePosition(to);
+    
+    if (mapRef.current) {
+      const dist = mapRef.current.getMap().project(from).dist(mapRef.current.getMap().project(to));
+      setRadius(dist);
     }
+    setHandlePosition(to);
   };
 
   const handleConfirm = () => {
@@ -325,7 +315,8 @@ export function GeoRadiusPicker() {
             draggable
             onDragStart={() => setIsRadiusDragging(true)}
             onDrag={onRadiusDrag}
-            onDragEnd={() => {
+            onDragEnd={(e) => {
+              onRadiusDrag(e);
               setIsRadiusDragging(false);
             }}
         >
