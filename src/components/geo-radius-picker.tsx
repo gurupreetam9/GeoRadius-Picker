@@ -1,43 +1,87 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import L from "leaflet";
+import Map, { Marker, Source, Layer, MapRef, ViewState, Point } from "react-map-gl";
+import maplibregl from "maplibre-gl";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { MapPin, Search, Copy, CheckCircle, Loader2, Locate } from "lucide-react";
+import { Search, Copy, CheckCircle, Loader2, Locate } from "lucide-react";
 
 import { geocodeAddress } from "@/ai/flows/geocode-address-to-coordinates";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormMessage,
-} from "@/components/ui/form";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
+import { AlertDialog, AlertDialogAction, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "./ui/label";
 
-const INITIAL_CENTER: L.LatLngExpression = [51.5072, -0.1276]; // London
+// Turf.js helpers for geo calculations
+function destination(center: [number, number], radius: number, bearing: number): [number, number] {
+  const R = 6371e3; // Earth's radius in meters
+  const toRad = (deg: number) => deg * (Math.PI / 180);
+  const toDeg = (rad: number) => rad * (180 / Math.PI);
+
+  const [lon1, lat1] = center;
+  const lat1Rad = toRad(lat1);
+  const lon1Rad = toRad(lon1);
+  const brng = toRad(bearing);
+  const ad = radius / R;
+
+  const lat2Rad = Math.asin(Math.sin(lat1Rad) * Math.cos(ad) + Math.cos(lat1Rad) * Math.sin(ad) * Math.cos(brng));
+  const lon2Rad = lon1Rad + Math.atan2(Math.sin(brng) * Math.sin(ad) * Math.cos(lat1Rad), Math.cos(ad) - Math.sin(lat1Rad) * Math.sin(lat2Rad));
+  
+  return [toDeg(lon2Rad), toDeg(lat2Rad)];
+}
+
+function createGeoJSONCircle(center: [number, number], radius: number, points = 64) {
+    const coords = {
+        latitude: center[1],
+        longitude: center[0]
+    };
+
+    const km = radius / 1000;
+    const ret = [];
+    const distanceX = km / (111.320 * Math.cos(coords.latitude * Math.PI / 180));
+    const distanceY = km / 110.574;
+
+    let theta, x, y;
+    for (let i = 0; i < points; i++) {
+        theta = (i / points) * (2 * Math.PI);
+        x = distanceX * Math.cos(theta);
+        y = distanceY * Math.sin(theta);
+
+        ret.push([coords.longitude + x, coords.latitude + y]);
+    }
+    ret.push(ret[0]);
+
+    return {
+        type: "geojson",
+        data: {
+            type: "FeatureCollection",
+            features: [{
+                type: "Feature",
+                geometry: {
+                    type: "Polygon",
+                    coordinates: [ret]
+                }
+            }]
+        }
+    };
+}
+
+
+const INITIAL_VIEW_STATE = {
+  longitude: -0.1276,
+  latitude: 51.5072,
+  zoom: 10,
+  pitch: 0,
+  bearing: 0,
+};
 const INITIAL_RADIUS = 5000; // 5km in meters
-const INITIAL_ZOOM = 10;
 const DEEP_LINK_BASE = "myapp://location-picker";
 
 const AddressFormSchema = z.object({
@@ -51,58 +95,37 @@ type FallbackInfo = {
   url: string;
 };
 
-// Custom icon for the markers
-const markerIcon = new L.Icon({
-    iconUrl: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" fill="%237B2CBF" stroke="white" stroke-width="1.5"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/><circle cx="12" cy="9.5" r="2.5" fill="white" /></svg>`,
-    iconSize: [32, 32],
-    iconAnchor: [16, 32],
-    popupAnchor: [0, -32],
-});
+const circleLayer: Layer = {
+    id: 'radius-circle',
+    type: 'fill',
+    source: 'radius-circle',
+    paint: {
+        'fill-color': 'hsl(var(--primary))',
+        'fill-opacity': 0.2
+    }
+};
 
-const radiusHandleIcon = new L.Icon({
-    iconUrl: `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="white" stroke="%237B2CBF" stroke-width="2"/></svg>`,
-    iconSize: [16, 16],
-    iconAnchor: [8, 8],
-});
-
-function getPointOnCircle(center: L.LatLng, radius: number, bearing: number): L.LatLng {
-    const R = 6371e3; // Earth's radius in meters
-    const toRad = (deg: number) => deg * (Math.PI / 180);
-    const toDeg = (rad: number) => rad * (180 / Math.PI);
-
-    const lat1 = toRad(center.lat);
-    const lon1 = toRad(center.lng);
-    const brng = toRad(bearing);
-
-    const lat2 = Math.asin(
-        Math.sin(lat1) * Math.cos(radius / R) +
-        Math.cos(lat1) * Math.sin(radius / R) * Math.cos(brng)
-    );
-
-    const lon2 =
-        lon1 +
-        Math.atan2(
-            Math.sin(brng) * Math.sin(radius / R) * Math.cos(lat1),
-            Math.cos(radius / R) - Math.sin(lat1) * Math.sin(lat2)
-        );
-
-    return L.latLng(toDeg(lat2), toDeg(lon2));
+const circleOutlineLayer: Layer = {
+    id: 'radius-circle-outline',
+    type: 'line',
+    source: 'radius-circle',
+    paint: {
+        'line-color': 'hsl(var(--primary))',
+        'line-width': 2
+    }
 }
 
 export function GeoRadiusPicker() {
-  const [center, setCenter] = useState(L.latLng(INITIAL_CENTER[0], INITIAL_CENTER[1]));
+  const [viewState, setViewState] = useState<Partial<ViewState>>(INITIAL_VIEW_STATE);
+  const [center, setCenter] = useState([INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude]);
   const [radius, setRadius] = useState(INITIAL_RADIUS);
   const [fallbackInfo, setFallbackInfo] = useState<FallbackInfo | null>(null);
   const [copied, setCopied] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
-  const [userLocation, setUserLocation] = useState<L.LatLng | null>(null);
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  const [isRadiusDragging, setIsRadiusDragging] = useState(false);
 
-  const mapRef = useRef<L.Map | null>(null);
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const centerMarkerRef = useRef<L.Marker | null>(null);
-  const radiusMarkerRef = useRef<L.Marker | null>(null);
-  const circleRef = useRef<L.Circle | null>(null);
-  const isDraggingRadiusRef = useRef(false);
+  const mapRef = useRef<MapRef | null>(null);
 
   const { toast } = useToast();
 
@@ -110,28 +133,20 @@ export function GeoRadiusPicker() {
     resolver: zodResolver(AddressFormSchema),
     defaultValues: { address: "" },
   });
-  const {
-    formState: { isSubmitting },
-  } = form;
+  const { formState: { isSubmitting } } = form;
 
   useEffect(() => {
     setIsMounted(true);
-    return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-    }
   }, []);
 
   const locateUser = useCallback(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          const userLatLng = L.latLng(position.coords.latitude, position.coords.longitude);
-          setUserLocation(userLatLng);
-          setCenter(userLatLng);
-          mapRef.current?.setView(userLatLng, 13);
+          const userLngLat: [number, number] = [position.coords.longitude, position.coords.latitude];
+          setUserLocation(userLngLat);
+          setCenter(userLngLat);
+          mapRef.current?.flyTo({ center: userLngLat, zoom: 13 });
         },
         () => {
           toast({
@@ -139,111 +154,39 @@ export function GeoRadiusPicker() {
             title: "Location Error",
             description: "Could not access your location. Please enable location services.",
           });
-          mapRef.current?.setView(INITIAL_CENTER, INITIAL_ZOOM);
+          mapRef.current?.flyTo({ center: [INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude], zoom: INITIAL_VIEW_STATE.zoom });
         }
       );
     } else {
-      // Geolocation not supported
-      mapRef.current?.setView(INITIAL_CENTER, INITIAL_ZOOM);
+      mapRef.current?.flyTo({ center: [INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude], zoom: INITIAL_VIEW_STATE.zoom });
     }
   }, [toast]);
   
-  // Initialize map
   useEffect(() => {
-    if (isMounted && mapContainerRef.current && !mapRef.current) {
-      const map = L.map(mapContainerRef.current, {
-        center: center,
-        zoom: INITIAL_ZOOM,
-        scrollWheelZoom: true,
-        zoomControl: false,
-        touchZoom: true,
-        dragging: true,
-      });
-
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-      }).addTo(map);
-
-      mapRef.current = map;
-
-      // Get user's location
-      locateUser();
-      
-      map.on('click', (e) => {
-        if (!isDraggingRadiusRef.current) {
-          setCenter(e.latlng);
-        }
-      });
+    if(mapRef.current) {
+        locateUser();
     }
-  }, [isMounted, locateUser, center]);
+  }, [locateUser, mapRef.current]);
 
-  // Update markers and circle
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !isMounted) return;
-  
-    // Center Marker
-    if (!centerMarkerRef.current) {
-      centerMarkerRef.current = L.marker(center, { draggable: true, icon: markerIcon }).addTo(map);
-      centerMarkerRef.current.on('dragend', () => {
-        if (centerMarkerRef.current) {
-          setCenter(centerMarkerRef.current.getLatLng());
-        }
-      });
-    } else {
-      centerMarkerRef.current.setLatLng(center);
+  const circleSource = useMemo(() => createGeoJSONCircle(center as [number, number], radius), [center, radius]);
+  const handlePosition = useMemo(() => destination(center as [number, number], radius, 90), [center, radius]);
+
+  const onCenterDrag = (e: { lngLat: { lng: number; lat: number; }}) => {
+    setCenter([e.lngLat.lng, e.lngLat.lat]);
+  };
+
+  const onRadiusDrag = (e: { lngLat: { lng: number, lat: number }}) => {
+    const from = center;
+    const to = [e.lngLat.lng, e.lngLat.lat];
+    const newRadius = mapRef.current?.getMap().project(from).dist(mapRef.current?.getMap().project(to));
+    if(newRadius) {
+       setRadius(newRadius);
     }
-  
-    // Radius Circle
-    if (!circleRef.current) {
-      circleRef.current = L.circle(center, {
-        radius: radius,
-        color: 'hsl(var(--primary))',
-        fillColor: 'hsl(var(--primary))',
-        fillOpacity: 0.2,
-        weight: 2
-      }).addTo(map);
-    } else {
-      circleRef.current.setLatLng(center);
-      circleRef.current.setRadius(radius);
-    }
-  
-    // Radius Handle Marker
-    if (!radiusMarkerRef.current) {
-      const handlePosition = getPointOnCircle(center, radius, 90);
-      radiusMarkerRef.current = L.marker(handlePosition, { draggable: true, icon: radiusHandleIcon }).addTo(map);
-      
-      radiusMarkerRef.current.on('dragstart', () => {
-        isDraggingRadiusRef.current = true;
-      });
-      
-      radiusMarkerRef.current.on('drag', () => {
-        if (radiusMarkerRef.current && centerMarkerRef.current && circleRef.current) {
-          const centerPoint = centerMarkerRef.current.getLatLng();
-          const handlePoint = radiusMarkerRef.current.getLatLng();
-          const newRadius = centerPoint.distanceTo(handlePoint);
-          setRadius(newRadius);
-          circleRef.current.setRadius(newRadius); // Update circle radius in real-time
-        }
-      });
-
-      radiusMarkerRef.current.on('dragend', () => {
-        isDraggingRadiusRef.current = false;
-      });
-
-    } else {
-       if (!isDraggingRadiusRef.current) {
-         const handlePosition = getPointOnCircle(center, radius, 90);
-         radiusMarkerRef.current.setLatLng(handlePosition);
-       }
-    }
-  
-  }, [center, radius, isMounted]);
-
+  };
 
   const handleConfirm = () => {
-    const lat = parseFloat(center.lat.toFixed(6));
-    const lng = parseFloat(center.lng.toFixed(6));
+    const lng = parseFloat(center[0].toFixed(6));
+    const lat = parseFloat(center[1].toFixed(6));
     const rad = Math.round(radius);
     const deepLinkUrl = `${DEEP_LINK_BASE}?lat=${lat}&lng=${lng}&radius=${rad}`;
 
@@ -270,9 +213,9 @@ export function GeoRadiusPicker() {
     try {
       const result = await geocodeAddress({ address: data.address });
       if (result?.latitude && result?.longitude) {
-        const newCenter = L.latLng(result.latitude, result.longitude);
+        const newCenter: [number, number] = [result.longitude, result.latitude];
         setCenter(newCenter);
-        mapRef.current?.setView(newCenter, 14);
+        mapRef.current?.flyTo({ center: newCenter, zoom: 14 });
         toast({
           title: "Location Found",
           description: `Map centered on ${data.address}.`,
@@ -292,21 +235,15 @@ export function GeoRadiusPicker() {
   const handleRecenter = () => {
     if (userLocation) {
         setCenter(userLocation);
-        mapRef.current?.setView(userLocation, 13);
+        mapRef.current?.flyTo({ center: userLocation, zoom: 13 });
         toast({
             title: "Re-centered",
             description: "Map centered on your current location.",
         });
     } else {
-        locateUser(); // If user location is not available, try to get it again.
+        locateUser(); 
     }
   };
-
-  useEffect(() => {
-    if (mapRef.current) {
-        mapRef.current.panTo(center);
-    }
-  }, [center]);
 
   if (!isMounted) {
      return <div className="h-full w-full flex items-center justify-center"><p>Loading Map...</p></div>;
@@ -314,7 +251,54 @@ export function GeoRadiusPicker() {
 
   return (
     <>
-      <div ref={mapContainerRef} className="h-full w-full" />
+      <Map
+        ref={mapRef}
+        mapLib={maplibregl}
+        initialViewState={INITIAL_VIEW_STATE}
+        {...viewState}
+        onMove={evt => setViewState(evt.viewState)}
+        onClick={(e) => {
+          if (!isRadiusDragging) {
+             setCenter([e.lngLat.lng, e.lngLat.lat]);
+          }
+        }}
+        style={{ width: "100%", height: "100%" }}
+        mapStyle="https://api.maptiler.com/maps/streets/style.json?key=get_your_own_OpIi9ZULNHzrESv6T2vL"
+      >
+        <Source id="radius-circle" {...circleSource}>
+            <Layer {...circleLayer} />
+            <Layer {...circleOutlineLayer} />
+        </Source>
+
+        <Marker
+            longitude={center[0]}
+            latitude={center[1]}
+            draggable
+            onDrag={onCenterDrag}
+            onDragEnd={onCenterDrag}
+            anchor="bottom"
+        >
+            <div className="cursor-pointer">
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" fill="#7B2CBF" stroke="white" strokeWidth="1.5"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/><circle cx="12" cy="9.5" r="2.5" fill="white" /></svg>
+            </div>
+        </Marker>
+
+        <Marker
+            longitude={handlePosition[0]}
+            latitude={handlePosition[1]}
+            draggable
+            onDragStart={() => setIsRadiusDragging(true)}
+            onDrag={onRadiusDrag}
+            onDragEnd={(e) => {
+              onRadiusDrag(e);
+              setIsRadiusDragging(false);
+            }}
+        >
+            <div className="cursor-pointer">
+                <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="white" stroke="#7B2CBF" strokeWidth="2"/></svg>
+            </div>
+        </Marker>
+      </Map>
       
       <Button
         variant="outline"
@@ -337,11 +321,11 @@ export function GeoRadiusPicker() {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <Label className="text-xs text-muted-foreground">Latitude</Label>
-                  <p className="font-mono">{center.lat.toFixed(6)}</p>
+                  <p className="font-mono">{center[1].toFixed(6)}</p>
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground">Longitude</Label>
-                  <p className="font-mono">{center.lng.toFixed(6)}</p>
+                  <p className="font-mono">{center[0].toFixed(6)}</p>
                 </div>
               </div>
 
