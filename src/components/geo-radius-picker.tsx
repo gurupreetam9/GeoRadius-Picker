@@ -127,9 +127,12 @@ export function GeoRadiusPicker() {
   }, []);
 
   useEffect(() => {
-      const newHandlePosition = destination(center as [number, number], radius, 90);
-      setHandlePosition(newHandlePosition);
-  }, [center, radius]);
+      // Only update handle position from radius if not dragging
+      if (!isRadiusDragging) {
+        const newHandlePosition = destination(center as [number, number], radius, 90);
+        setHandlePosition(newHandlePosition);
+      }
+  }, [center, radius, isRadiusDragging]);
 
   const circleLayer: Layer = useMemo(() => ({
     id: 'radius-circle',
@@ -188,7 +191,7 @@ export function GeoRadiusPicker() {
 
   const onRadiusDrag = (e: { lngLat: { lng: number, lat: number }}) => {
     const from = center;
-    const to = [e.lngLat.lng, e.lngLat.lat];
+    const to: [number, number] = [e.lngLat.lng, e.lngLat.lat];
     const newRadius = mapRef.current?.getMap().project(from).dist(mapRef.current?.getMap().project(to));
     if(newRadius) {
        setRadius(newRadius);
@@ -322,12 +325,11 @@ export function GeoRadiusPicker() {
             draggable
             onDragStart={() => setIsRadiusDragging(true)}
             onDrag={onRadiusDrag}
-            onDragEnd={(e) => {
-              onRadiusDrag(e);
+            onDragEnd={() => {
               setIsRadiusDragging(false);
             }}
         >
-            <div className="cursor-pointer">
+            <div className="cursor-grab active:cursor-grabbing">
                 <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="white" stroke={primaryColor} strokeWidth="2"/></svg>
             </div>
         </Marker>
