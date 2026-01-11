@@ -107,24 +107,25 @@ export function GeoRadiusPicker() {
   }, []);
 
   useEffect(() => {
-      // Only update handle if not dragging
-      if (!isRadiusDragging) {
-        const bearing = 90; // East
-        const R = 6371e3; // Earth's radius in meters
-        const toRad = (deg: number) => deg * (Math.PI / 180);
-        const toDeg = (rad: number) => rad * (180 / Math.PI);
+    // This effect now only runs when the radius is changed by something OTHER than dragging, like the slider.
+    if (isRadiusDragging) return;
+    
+    const bearing = 90; // East
+    const R = 6371e3; // Earth's radius in meters
+    const toRad = (deg: number) => deg * (Math.PI / 180);
+    const toDeg = (rad: number) => rad * (180 / Math.PI);
+  
+    const [lon1, lat1] = center;
+    const lat1Rad = toRad(lat1);
+    const lon1Rad = toRad(lon1);
+    const brng = toRad(bearing);
+    const ad = radius / R;
+  
+    const lat2Rad = Math.asin(Math.sin(lat1Rad) * Math.cos(ad) + Math.cos(lat1Rad) * Math.sin(ad) * Math.cos(brng));
+    const lon2Rad = lon1Rad + Math.atan2(Math.sin(brng) * Math.sin(ad) * Math.cos(lat1Rad), Math.cos(ad) - Math.sin(lat1Rad) * Math.sin(lat2Rad));
+    
+    setHandlePosition([toDeg(lon2Rad), toDeg(lat2Rad)]);
       
-        const [lon1, lat1] = center;
-        const lat1Rad = toRad(lat1);
-        const lon1Rad = toRad(lon1);
-        const brng = toRad(bearing);
-        const ad = radius / R;
-      
-        const lat2Rad = Math.asin(Math.sin(lat1Rad) * Math.cos(ad) + Math.cos(lat1Rad) * Math.sin(ad) * Math.cos(brng));
-        const lon2Rad = lon1Rad + Math.atan2(Math.sin(brng) * Math.sin(ad) * Math.cos(lat1Rad), Math.cos(ad) - Math.sin(lat1Rad) * Math.sin(lat2Rad));
-        
-        setHandlePosition([toDeg(lon2Rad), toDeg(lat2Rad)]);
-      }
   }, [center, radius, isRadiusDragging]);
 
   const circleLayer: Layer = useMemo(() => ({
@@ -183,7 +184,7 @@ export function GeoRadiusPicker() {
     const from = center;
     const to: [number, number] = [e.lngLat.lng, e.lngLat.lat];
     
-    // Using cheap distance formula for real-time feedback
+    // Haversine formula for distance
     const R = 6371e3; // metres
     const toRad = (deg: number) => deg * Math.PI/180;
     const φ1 = toRad(from[1]);
@@ -199,13 +200,12 @@ export function GeoRadiusPicker() {
     const dist = R * c; // in metres
     
     setRadius(dist);
-    // Let the marker component handle its own position during drag
+    // Directly update handle position during drag for smoothness
+    setHandlePosition(to);
   }, [center]);
 
-  const onRadiusDragEnd = (e: { lngLat: { lng: number, lat: number }}) => {
+  const onRadiusDragEnd = () => {
     setIsRadiusDragging(false);
-    // Final sync of the handle position
-    setHandlePosition([e.lngLat.lng, e.lngLat.lat]);
   }
 
   const handleConfirm = () => {
