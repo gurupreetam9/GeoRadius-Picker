@@ -95,26 +95,6 @@ type FallbackInfo = {
   url: string;
 };
 
-const circleLayer: Layer = {
-    id: 'radius-circle',
-    type: 'fill',
-    source: 'radius-circle',
-    paint: {
-        'fill-color': 'hsl(var(--primary))',
-        'fill-opacity': 0.2
-    }
-};
-
-const circleOutlineLayer: Layer = {
-    id: 'radius-circle-outline',
-    type: 'line',
-    source: 'radius-circle',
-    paint: {
-        'line-color': 'hsl(var(--primary))',
-        'line-width': 2
-    }
-}
-
 export function GeoRadiusPicker() {
   const [viewState, setViewState] = useState<Partial<ViewState>>(INITIAL_VIEW_STATE);
   const [center, setCenter] = useState([INITIAL_VIEW_STATE.longitude, INITIAL_VIEW_STATE.latitude]);
@@ -124,6 +104,7 @@ export function GeoRadiusPicker() {
   const [isMounted, setIsMounted] = useState(false);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [isRadiusDragging, setIsRadiusDragging] = useState(false);
+  const [primaryColor, setPrimaryColor] = useState("#7B2CBF");
 
   const mapRef = useRef<MapRef | null>(null);
 
@@ -137,7 +118,32 @@ export function GeoRadiusPicker() {
 
   useEffect(() => {
     setIsMounted(true);
+    const color = getComputedStyle(document.documentElement).getPropertyValue('--primary');
+    if (color) {
+      // The color is in HSL format like "263 62% 45%", convert to "hsl(263, 62%, 45%)"
+      setPrimaryColor(`hsl(${color.trim()})`);
+    }
   }, []);
+
+  const circleLayer: Layer = useMemo(() => ({
+    id: 'radius-circle',
+    type: 'fill',
+    source: 'radius-circle',
+    paint: {
+        'fill-color': primaryColor,
+        'fill-opacity': 0.2
+    }
+  }), [primaryColor]);
+
+  const circleOutlineLayer: Layer = useMemo(() => ({
+      id: 'radius-circle-outline',
+      type: 'line',
+      source: 'radius-circle',
+      paint: {
+          'line-color': primaryColor,
+          'line-width': 2
+      }
+  }), [primaryColor]);
 
   const locateUser = useCallback(() => {
     if (navigator.geolocation) {
@@ -300,7 +306,7 @@ export function GeoRadiusPicker() {
             anchor="bottom"
         >
             <div className="cursor-pointer">
-                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" fill="#7B2CBF" stroke="white" strokeWidth="1.5"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/><circle cx="12" cy="9.5" r="2.5" fill="white" /></svg>
+                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" fill={primaryColor} stroke="white" strokeWidth="1.5"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/><circle cx="12" cy="9.5" r="2.5" fill="white" /></svg>
             </div>
         </Marker>
 
@@ -316,7 +322,7 @@ export function GeoRadiusPicker() {
             }}
         >
             <div className="cursor-pointer">
-                <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="white" stroke="#7B2CBF" strokeWidth="2"/></svg>
+                <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="white" stroke={primaryColor} strokeWidth="2"/></svg>
             </div>
         </Marker>
       </Map>
